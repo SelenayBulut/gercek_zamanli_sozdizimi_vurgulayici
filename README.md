@@ -1,5 +1,5 @@
 
-# 🎯 Gerçek Zamanlı Sözdizimi Vurgulayıcı (Mini C Dili için)
+# 🎯 Gerçek Zamanlı Sözdizimi Vurgulayıcı Raporu(Mini C Dili için)
 
 ## 👋 Giriş
 
