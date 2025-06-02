@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Gerçek Zamanlı Sözdizimi Vurgulayıcı</title>
+  <style>
+
+     /* Sayfa genel yazı tipi ve boşluk ayarı */
+    body {
+      font-family: monospace;
+      margin: 20px;
+    }
+
+    /* Kullanıcının kod yazdığı metin kutusu */
+    textarea {
+      width: 100%;
+      height: 200px;
+      font-family: monospace;
+      font-size: 14px;
+    }
+
+     /* Vurgulanan kodun gösterildiği kutu */
+    #highlightedCode {
+      white-space: pre-wrap;
+      border: 1px solid #ccc;
+      padding: 10px;
+      background: #f9f9f9;
+      font-family: monospace;
+    }
+
+     /* Sözdizimsel vurgulama stilleri */
+    .keyword { color: blue; font-weight: bold; }
+    .identifier { color: rgb(116, 22, 164); }
+    .number { color: rgb(33, 239, 33); }
+    .operator { color: rgb(10, 10, 9); }
+    .punctuation { color: rgb(217, 36, 163); }
+    .error { background-color: pink; color: red; }
+    .string-literal {color: orange;}
+    #errorMessage {
+      color: red;
+      margin-top: 10px;
+      min-height: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h2>Gerçek Zamanlı Sözdizimi Vurgulayıcı (C Dili)</h2>
+  <textarea id="codeInput" placeholder="Kodunuzu buraya yazın..."></textarea>
+  <div id="highlightedCode"></div>
+  <div id="errorMessage"></div>
+
+  <script>
+
+    // Tanımlı C dili anahtar kelimeleri ve operatörler listesi
+    const keywords = ["int", "if", "else", "while", "return", "switch", "case", "break","default","printf"];
+    const operators = ["+", "-", "*", "/", "=", "==", "<", ">", "!="];
+
+
+    // Kod girişini parçalayıp token listesi döndüren fonksiyon
+    function tokenize(code) {
+      const tokens = [];
+      let i = 0;
+
+      // Tüm karakterler bitene kadar döngü
+      while (i < code.length) {
+        const ch = code[i];
+
+
+         // String literal kontrolü
+    if (ch === '"') {
+      let str = '"';
+      i++;
+      while (i < code.length && code[i] !== '"') {
+        str += code[i++];
+      }
+      if (i < code.length && code[i] === '"') {
+        str += '"';
+        i++;
+        tokens.push(str);// tamamlanmış string eklenir
+      } else {
+        // kapanmamış string
+        tokens.push(str); // hata kontrolü ileride yapılır
+      }
+    }
+
+    // Boşluk karakterleri (whitespace): boşluk, tab, newline
+        else if (ch.match(/[ \t\n]/)) {
+          let space = ch;
+          i++;
+          while (i < code.length && code[i].match(/[ \t\n]/)) {
+            space += code[i++];
+          }
+          tokens.push(space); // boşlukları ayrı token olarak tutar
+        } 
+
+        // Tanımlayıcı veya anahtar kelime
+        else if (ch.match(/[A-Za-z_]/)) {
+          let ident = ch;
+          i++;
+          while (i < code.length && code[i].match(/[A-Za-z0-9_]/)) {
+            ident += code[i++];
+          }
+          tokens.push(ident);
+        } 
+        
+        
+         // Sayı token’ı(tam sayı ya da ondalıklı)
+        else if (ch.match(/[0-9]/)) {
+          let number = ch;
+          i++;
+          let dotSeen = false;
+          while (i < code.length && (code[i].match(/[0-9]/) || (!dotSeen && code[i] === '.'))) {
+            if (code[i] === '.') dotSeen = true;
+            number += code[i++];
+          }
+          tokens.push(number);
+        } 
+        
+        
+        // Tek satırlık yorum
+        else if (ch === '/' && code[i + 1] === '/') {
+          let comment = '';
+          while (i < code.length && code[i] !== '\n') {
+            comment += code[i++];
+          }
+          tokens.push(comment);
+        } 
+        
+         // Eşitlik operatörü (==)
+        else if (ch === '=' && code[i + 1] === '=') {
+          tokens.push('==');
+          i += 2;
+        }
+        
+         // Eşit değil operatörü (!=)
+        else if (ch === '!' && code[i + 1] === '=') {
+          tokens.push('!=');
+          i += 2;
+        }
+        
+        
+         // Diğer tek karakterli operatörler veya noktalama işaretleri
+        else if (operators.includes(ch) || "(){};:".includes(ch)) {
+          tokens.push(ch);
+          i++;
+        } 
+        
+        
+        // Yukarıdaki hiçbir kategoriye uymayan karakterler
+        else {
+          tokens.push(ch);
+          i++;
+        }
+      }
+      return tokens;// Token listesi döndürülür
+    }
+
+
+// Token'ı türüne göre sınıflandıran fonksiyon
+    function classifyToken(token) {
+      if (/^\s+$/.test(token)) return { type: "whitespace", value: token };
+      if (/^\d+(\.\d+)?$/.test(token)) return { type: "number", value: token };
+      if (keywords.includes(token)) return { type: "keyword", value: token };
+      if (operators.includes(token)) return { type: "operator", value: token };
+      if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(token)) return { type: "identifier", value: token };
+      if (/^[(){};:""]$/.test(token)) return { type: "punctuation", value: token };
+      if (/^".*"$/.test(token)) {
+    return { type: "string", value: token };
+  }
+ 
+      return { type: "error", value: token };
+    }
+
+
+    // // Değişken tanımlama ve atama işlemlerini kontrol eden fonksiyon
+    function parseVariableDeclaration(tokens, index) {
+      const varType = tokens[index]; // Değişken tipi
+     
+      let i = index + 1;
+
+      // Boşluk varsa atla
+      while (i < tokens.length && /^\s+$/.test(tokens[i])) i++;
+
+      // Değişken adı kontrolü
+      const varName = tokens[i];
+      if (!varName || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(varName)) {
+        return `Hata: '${varType}' ifadesinden sonra geçerli bir değişken adı gelmeli.`;
+      }
+      i++;
+
+        // Sonraki tokenlara geç, boşlukları atla
+      while (i < tokens.length && /^\s+$/.test(tokens[i])) i++;
+
+      // '=' var mı kontrol et
+      if (tokens[i] === '=') {
+        i++;
+        // Boşluk varsa atla
+        while (i < tokens.length && /^\s+$/.test(tokens[i])) i++;
+
+        const value = tokens[i];// Atanan değer
+        if (!value) {
+          return `Hata: '${varType} ${varName}' atamasında değer eksik.`;
+        }
+
+        // Özel kontrol: int türüne ondalıklı sayı atanamaz
+        if (varType === "int" && /^\d+\.\d+$/.test(value)) {
+      return `Hata: 'int ${varName}' değişkenine ondalıklı sayı atanamaz.`;
+    }
+        i++;
+        // Boşluk varsa atla
+        while (i < tokens.length && /^\s+$/.test(tokens[i])) i++;
+      }
+
+      //Tanımlamanın sonunda noktalı virgül olmalı
+      if (tokens[i] !== ";") {
+        return `Hata: '${varType} ${varName}' tanımından sonra noktalı virgül (;) eksik.`;
+      }
+
+      return "";
+    }
+
+    
+
+
+function isValidExpression(tokens) {
+  // tokens: parantez içindeki ifadeyi temsil eden token listesi
+  // Bu örnek, sadece çok basit ifadeleri (değişken, sayı, operand) kontrol eder
+  
+
+  if (tokens.length === 0) return false;// İfade boşsa geçersizdir
+
+  let expectOperand = true;// İfadede önce operand (sayı, değişken veya parantezli ifade) beklenir
+
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+
+    if (expectOperand) {
+      if (/^\d+$/.test(token) || /^[A-Za-z_][A-Za-z0-9_]*$/.test(token)) {
+         // Token sayı ya da geçerli değişken adı ise operand alındı, artık operator beklenir
+        expectOperand = false;
+      } else if (token === "(") {
+       // Açılan parantez varsa, parantez içi ifadeyi bul ve onun geçerliliğini kontrol et
+        let open = 1;
+        let j = i + 1;
+        while (j < tokens.length && open > 0) {
+          if (tokens[j] === "(") open++;
+          else if (tokens[j] === ")") open--;
+          j++;
+        }
+        if (open !== 0) return false; // parantez kapanmadı
+        const inner = tokens.slice(i + 1, j - 1);
+        if (!isValidExpression(inner)) return false;
+        i = j - 1;
+        expectOperand = false;
+      } else {
+        // Beklenen operand değilse hata
+        return false;
+      }
+    } else {
+      // Operand sonrası operator beklenir
+      if (["+", "-", "*", "/", "<", "<=", ">", ">=", "==", "!=", "&&", "||"].includes(token)) {
+        expectOperand = true;
+      } else {
+        return false;
+      }
+    }
+  }
+
+  // Döngü sonunda operand beklenmiyor olmalı
+  return !expectOperand;
+}
+
+function checkIfExpression(tokens, startIndex) {
+  let i = startIndex + 1;
+  if (tokens[i] !== "(") {
+    return "Hata: 'if' ifadesinden sonra '(' bekleniyor.";
+  }
+  i++;
+
+  let exprTokens = [];// Parantez içindeki ifade tokenlarını tutar
+  let hasExpression = false; // Parantezler arasında en az bir ifade olup olmadığını kontrol eder
+  let openParens = 1;// Açılan parantez sayısını tutar, başlangıçta 1 
+
+
+   // Parantezler dengelenene kadar devam eder
+  while (i < tokens.length && openParens > 0) {
+    const token = tokens[i];
+    if (token === "(") openParens++;
+    else if (token === ")") {
+      openParens--;
+      if (openParens === 0) break;
+    } else if (!/^\s+$/.test(token)) {
+      hasExpression = true;
+      exprTokens.push(token);
+    } else {
+      exprTokens.push(token);
+    }
+    i++;
+  }
+
+  // Eğer parantez dengesi sağlanmadıysa hata döndür
+  if (openParens !== 0) {
+    return "Hata: 'if' ifadesinde parantez kapanmamış.";
+  }
+   // Parantezler arasında hiç ifade yoksa hata döndür
+  if (!hasExpression) {
+    return "Hata: 'if' parantezleri arasında ifade olmalı.";
+  }
+  // İfade geçerli değilse hata döndür
+  if (!isValidExpression(exprTokens)) {
+    return "Hata: 'if' ifadesindeki ifade geçerli değil.";
+  }
+  // 'if' ifadesinden sonra mutlaka '{' gelmeli, yoksa hata döndür
+  if (tokens[i + 1] !== "{") {
+    return "Hata: 'if' ifadesinden sonra '{' bekleniyor.";
+  }
+
+  let openBraces = 1;
+i += 2; // '{' parantezinden sonrasından başla
+
+while (i < tokens.length && openBraces > 0) {
+  const t = tokens[i];
+  if (t === "{") openBraces++;
+  else if (t === "}") openBraces--;
+  i++;
+}
+
+if (openBraces !== 0) {
+  return "Hata: 'if' bloğunda süslü parantez kapanmamış.";
+}
+   // Hata yoksa boş string döndür (başarılı)
+  return "";
+}
+
+
+function checkElseIfExpression(tokens, startIndex) {
+  if (tokens[startIndex] !== "else" || tokens[startIndex + 1] !== "if") {
+    return "Hata: 'else if' doğru formatta değil.";
+  }
+  if (tokens[startIndex + 2] !== "(") {
+    return "Hata: 'else if' ifadesinden sonra '(' bekleniyor.";
+  }
+  
+  // Parantez içi ifadeyi kontrol etmek için checkIfExpression fonksiyonunu kullan
+  return checkIfExpression(tokens, startIndex + 1);
+}
+// 'else' ifadesinin doğru formatta olup olmadığını kontrol eder
+function checkElseExpression(tokens, startIndex) {
+
+   // İlk token 'else' olmalı
+  if (tokens[startIndex] !== "else") {
+    return "Hata: 'else' bekleniyordu.";
+  }
+  const next = tokens[startIndex + 1];
+  const nextt = tokens[startIndex + 2];
+  // Eğer 'else if' ise bu fonksiyonun sorumluluğunda değil
+  if (nextt === "if") {
+    return ""; 
+  }
+  // 'else' ifadesinden sonra mutlaka '{' süslü parantezi gelmeli
+  if (next !== "{") {
+    return "Hata: 'else' ifadesinden sonra '{' bekleniyor.";
+  }
+
+  // Süslü parantezler dengelenene kadar devam et
+  let openBraces = 1;
+  let i = startIndex + 2;
+  while (i < tokens.length && openBraces > 0) {
+    if (tokens[i] === "{") openBraces++;
+    else if (tokens[i] === "}") openBraces--;
+    i++;
+  }
+
+   // Eğer kapanış parantezi yoksa hata döndür
+  if (openBraces !== 0) {
+    return "Hata: 'else' bloğunda süslü parantez kapanmamış.";
+  }
+
+  return "";
+}
+
+
+// 'while' ifadesindeki koşul ifadesinin doğruluğunu kontrol eder
+    function checkWhileExpression(tokens, startIndex) {
+
+      // 'while' ifadesinden sonra '(' gelmeli
+      let i = startIndex + 1;
+      if (tokens[i] !== "(") {
+        return "Hata: 'while' ifadesinden sonra '(' bekleniyor.";
+      }
+      i++;
+
+      let hasExpression = false;// Parantezler arasında en az bir ifade var mı?
+      let openParens = 1;// Açık parantez sayısı
+
+
+      // Parantezler dengelenene kadar tokenları kontrol et
+      while (i < tokens.length && openParens > 0) {
+        const token = tokens[i];
+        if (token === "(") openParens++;
+        else if (token === ")") {
+          openParens--;
+          if (openParens === 0) break;
+        } else if (!/^\s+$/.test(token)) {
+          hasExpression = true;
+        }
+        i++;
+      }
+
+       // Parantez dengesi sağlanmadıysa hata döndür
+      if (openParens !== 0) {
+        return "Hata: 'while' ifadesinde parantez kapanmamış.";
+      }
+       // Parantezler arasında ifade yoksa hata döndür
+      if (!hasExpression) {
+        return "Hata: 'while' parantezleri arasında ifade olmalı.";
+      }
+
+       // Parantezden sonra '{' gelmeli
+  if (tokens[i + 1] !== "{") {
+    return "Hata: 'while' ifadesinden sonra '{' bekleniyor.";
+  }
+
+  // Süslü parantezlerin kapanmasını kontrol et
+  let openBraces = 1;
+  i += 2; // '{' sonrası kontrol başlasın
+
+  while (i < tokens.length && openBraces > 0) {
+    if (tokens[i] === "{") openBraces++;
+    else if (tokens[i] === "}") openBraces--;
+    i++;
+  }
+
+  if (openBraces !== 0) {
+    return "Hata: 'while' bloğunda süslü parantez kapanmamış.";
+  }
+       // Her şey doğruysa boş string döndür
+      return "";
+    }
+
+    // 'switch' ifadesinin yapısal doğruluğunu kontrol eder
+    function checkSwitchStructure(tokens, startIndex) {
+      let i = startIndex + 1;
+      if (tokens[i] !== "(") {
+        return "Hata: 'switch' ifadesinden sonra '(' bekleniyor.";
+      }
+      i++;
+
+      let openParens = 1;
+      while (i < tokens.length && openParens > 0) {
+        if (tokens[i] === "(") openParens++;
+        else if (tokens[i] === ")") openParens--;
+        i++;
+      }
+      if (openParens !== 0) {
+        return "Hata: 'switch' ifadesinde parantez kapanmamış.";
+      }
+
+      if (tokens[i] !== "{") {
+        return "Hata: 'switch' ifadesinden sonra '{' bekleniyor.";
+      }
+      i++;
+
+      let openBraces = 1;
+      while (i < tokens.length && openBraces > 0) {
+        if (tokens[i] === "{") openBraces++;
+        else if (tokens[i] === "}") openBraces--;
+        i++;
+      }
+      if (openBraces !== 0) {
+        return "Hata: 'switch' ifadesinde süslü parantez kapanmamış.";
+      }
+      return "";
+    }
+
+    // 'case' ifadesinin doğru yazılıp yazılmadığını kontrol eder
+    function checkCaseStatement(tokens, startIndex) {
+  const value = tokens[startIndex + 2];  // 'case' ifadesinden sonra gelen değer
+  const colon = tokens[startIndex + 3]; // 'case' ifadesinden sonra gelen ':' karakteri
+
+  // Değer yoksa hata döndür
+  if (!value) {
+    return "Hata: 'case' ifadesinden sonra değer gelmeli.";
+  }
+
+  // Değer ne tam sayı ne de geçerli tanımlayıcı değilse hata döndür
+  if (!/^\d+$/.test(value) && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
+    return "Hata: 'case' ifadesinden sonra sayı ya da geçerli bir tanımlayıcı gelmeli.";
+  }
+  // Değerden sonra ':' gelmeli, yoksa hata
+  if (colon !== ":") {
+    return "Hata: 'case' ifadesinden sonra ':' bekleniyor.";
+  }
+
+  // case bloğunda break kontrolü ve break sonrası noktalama kontrolü
+  let i = startIndex + 3;
+  let foundBreak = false;
+
+  while (i < tokens.length) {
+    const token = tokens[i];
+    if (token === "break") {
+      foundBreak = true;
+      if (tokens[i + 1] !== ";") {
+        return "Hata: 'break' ifadesinden sonra ';' bekleniyor.";
+      }
+      
+    }
+      // 'default' ifadesi gelirse kontrolü bitir
+    if (token === "default") {
+      foundBreak = true;
+      if (tokens[i + 1] !== ":") {
+        return "Hata: 'default' ifadesinden sonra ':' bekleniyor.";
+      }
+      break;
+    }
+    // Yeni 'case' ifadesi bulunursa döngüyü bitir
+    if (token === "case" || token === "default") {
+      break;
+    }
+    i++;
+  }
+
+
+  return "";
+}
+
+
+// 'printf' ifadesinin doğru kullanımını kontrol eder
+function checkPrintfUsage(tokens, startIndex) {
+  if (tokens[startIndex] !== "printf") {
+    return "Hata: 'printf' ifadesi bekleniyordu.";
+  }
+
+  if (tokens[startIndex + 1] !== "(") {
+    return "Hata: 'printf' ifadesinden sonra '(' bekleniyor.";
+  }
+
+  let i = startIndex + 2;
+  let openParens = 1;
+  let hasString = false;
+
+  while (i < tokens.length && openParens > 0) {
+    const token = tokens[i];
+
+    if (token === "(") openParens++;
+    else if (token === ")") openParens--;
+    else if (/^".*"$/.test(token)) hasString = true;
+
+    i++;
+  }
+
+  if (openParens !== 0) {
+    return "Hata: 'printf' ifadesinde parantezler dengeli değil.";
+  }
+  // Parantezler içindeki argümanlar arasında string yoksa hata döndür
+  if (!hasString) {
+    return "Hata: 'printf' içinde yazdırılacak bir string bulunamadı.";
+  }
+
+ // 'printf' ifadesinden sonra noktalı virgül ';' olmalı
+  if (tokens[i] !== ";") {
+    return "Hata: 'printf' ifadesinden sonra ';' bekleniyor.";
+  }
+
+  return "";
+}
+
+
+// Tüm token dizisini dolaşarak sözdizim hatalarını kontrol eder
+    function parseTokens(tokens) {
+      let errors = [];
+
+      for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i];
+
+// Eğer token bir anahtar kelimeyse ilgili kontrol fonksiyonunu çağırır
+        if (keywords.includes(token)) {
+          switch (token) {
+            case "int":
+              const errVar = parseVariableDeclaration(tokens, i);
+              if (errVar) errors.push(errVar);
+              break;
+
+            case "if":
+               // if yapısı kontrolü
+              const errIf = checkIfExpression(tokens, i);
+              if (errIf) errors.push(errIf);
+              break;
+
+            case "else":
+               // else if veya else yapısı kontrolü
+              if (tokens[i + 1] === "if") {
+    const errElseIf = checkElseIfExpression(tokens, i);
+    if (errElseIf) errors.push(errElseIf);
+    break;
+  } else {
+    const errElse = checkElseExpression(tokens, i);
+    if (errElse) errors.push(errElse);
+    break;
+  }
+  
+
+
+            case "while":
+              // while döngüsü kontrolü
+              const errWhile = checkWhileExpression(tokens, i);
+              if (errWhile) errors.push(errWhile);
+              break;
+
+            case "switch":
+               // switch yapısı kontrolü
+              const errSwitch = checkSwitchStructure(tokens, i);
+              if (errSwitch) errors.push(errSwitch);
+              break;
+
+            case "case":
+                 // case ifadesi kontrolü
+              const errCase = checkCaseStatement(tokens, i);
+              if (errCase) errors.push(errCase);
+              break;
+
+            case "printf":
+               // printf ifadesi kontrolü
+              const errPrintf = checkPrintfUsage(tokens, i);
+              if (errPrintf) errors.push(errPrintf);
+              break;
+            
+          }
+        }
+      }
+
+      return errors;
+    }
+
+    // Kodun sözdizimini renklendirir ve hataları döndürür
+    function highlightCode(code) {
+      // Kaynak kodu tokenlara ayır
+      const tokens = tokenize(code);
+      // Her tokenın türünü belirle (keyword, operator, identifier vs.)
+      const classifiedTokens = tokens.map(classifyToken);
+
+      // Token dizisine göre sözdizimsel hataları bul
+      const errors = parseTokens(tokens);
+
+      let highlighted = "";
+       // Her sınıflandırılmış token için uygun renklendirmeyi HTML olarak ekle
+      classifiedTokens.forEach(ct => {
+        switch (ct.type) {
+          case "keyword":
+            highlighted += `<span class="keyword">${ct.value}</span>`;
+            break;
+          case "identifier":
+            highlighted += `<span class="identifier">${ct.value}</span>`;
+            break;
+          case "number":
+            highlighted += `<span class="number">${ct.value}</span>`;
+            break;
+          case "operator":
+            highlighted += `<span class="operator">${ct.value}</span>`;
+            break;
+          case "punctuation":
+            highlighted += `<span class="punctuation">${ct.value}</span>`;
+            break;
+          case "whitespace":
+            highlighted += ct.value;
+            break;
+
+        case "string":
+  highlighted += `<span class="string-literal">${ct.value}</span>`;
+  break;
+case "function-call":
+  highlighted += `<span class="function-call">${ct.value}</span>`;
+  break;
+
+          default:
+            highlighted += `<span class="error">${ct.value}</span>`;
+        }
+      });
+
+      return { highlighted, errors };// Renklendirilmiş kod ve hata listesi döndürülür
+    }
+
+    // Gerekli Document öğeleri alınır
+    const codeInput = document.getElementById("codeInput");// Kullanıcının kod yazdığı <textarea>
+    const highlightedCode = document.getElementById("highlightedCode");// Renklendirilmiş HTML kodun görüneceği <div>
+    const errorMessage = document.getElementById("errorMessage");// Hataların gösterileceği <div>
+
+      // Kullanıcı kod yazdıkça tetiklenir
+    codeInput.addEventListener("input", () => {
+      const code = codeInput.value;// Kullanıcının yazdığı kod
+      const { highlighted, errors } = highlightCode(code);// Renklendirme ve hata kontrolü yapılır
+
+      highlightedCode.innerHTML = highlighted; // Renklendirilmiş kod ekranda gösterilir
+     
+     // Hatalar varsa göster, yoksa temizle
+      if (errors.length > 0) {
+        errorMessage.textContent = errors.join(" | ");
+      } else {
+        errorMessage.textContent = "";
+      }
+    });
+  </script>
+</body>
+</html>
