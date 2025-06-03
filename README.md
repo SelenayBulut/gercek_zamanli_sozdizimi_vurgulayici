@@ -10,7 +10,8 @@ Tüm analiz işlemleri (lexical ve syntax) sıfırdan JavaScript ile yazıldı.
 
 ## 🎥 Demo & Kaynaklar
 
-> 📹 **Demo Videosu:** [YouTube'da İzle](https://youtu.be/dMZyoenbB8w)  
+> 📹 **Demo Videosu:** [YouTube'da İzle](https://youtu.be/dMZyoenbB8w)
+>  **Live Demo:** [Web'de Çalışır](https://selenaybulut.github.io/gercek_zamanli_sozdizimi_vurgulayici/)
 
 
 ---
